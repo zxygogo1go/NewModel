@@ -1,0 +1,48 @@
+seed: 1234
+
+model:
+  image_channels: 1
+  tissue_channels: 0
+  base_channels: 4
+  num_skeleton_nodes: 10
+  velocity_integration_steps: 4
+  integration_steps: 4
+  residual_velocity_scale: 0.12
+
+data:
+  mode: synthetic
+  num_samples: 32
+  spatial_shape: [16, 16, 16]
+  num_blobs: 6
+  displacement_scale: 0.06
+  include_segmentation: true
+  enable_corruption: true
+  corruption_probability: 0.8
+  num_corruptions: 2
+  seed: 2026
+
+training:
+  device: cpu
+  batch_size: 1
+  learning_rate: 0.001
+  max_iters: 100
+  log_interval: 10
+  output_dir: outputs/checkpoints
+  checkpoint_name: neck_diffreg_synthetic_train.pt
+
+loss:
+  similarity: weighted_mse
+  ncc_window_size: 5
+  reliability_mean_target: 0.75
+  tissue_aware_smoothness: false
+  tissue_channel_weights: [2.0, 1.0, 1.0, 0.5, 0.5, 1.0, 0.3]
+  weights:
+    similarity: 1.0
+    smoothness: 0.05
+    jacobian: 0.01
+    reliability_tv: 0.02
+    reliability_sparsity: 0.01
+    reliability_mean_prior: 0.01
+    segmentation: 0.1
+    skeleton: 0.001
+    uncertainty: 0.0
