@@ -51,6 +51,8 @@ def train(config_path: str | Path) -> Path:
     max_iters = int(train_cfg.get("max_iters", 2))
     log_interval = max(1, int(train_cfg.get("log_interval", 1)))
     save_every = int(train_cfg.get("save_every", 0))
+    grad_clip_norm = train_cfg.get("grad_clip_norm")
+    grad_clip_norm = float(grad_clip_norm) if grad_clip_norm is not None else None
     output_dir = Path(train_cfg.get("output_dir", "outputs/checkpoints"))
     checkpoint_name = str(train_cfg.get("checkpoint_name", "neck_diffreg_synthetic.pt"))
     checkpoint_path = output_dir / checkpoint_name
@@ -85,6 +87,9 @@ def train(config_path: str | Path) -> Path:
             loss, components = criterion(outputs, batch)
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
+            if grad_clip_norm is not None and grad_clip_norm > 0:
+                grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip_norm)
+                components["grad_norm"] = grad_norm.detach()
             optimizer.step()
 
             step += 1

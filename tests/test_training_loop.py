@@ -72,6 +72,7 @@ def test_training_loop_saves_latest_and_best_checkpoints(tmp_path: Path) -> None
             "val_interval": 1,
             "val_max_batches": 1,
             "save_every": 0,
+            "grad_clip_norm": 1.0,
             "output_dir": str(tmp_path / "checkpoints"),
             "checkpoint_name": "latest.pt",
             "best_checkpoint_name": "best.pt",

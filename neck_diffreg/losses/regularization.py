@@ -118,11 +118,32 @@ def total_variation_loss(field: Tensor) -> Tensor:
     return gradient_smoothness_loss(field, penalty="l1")
 
 
-def jacobian_folding_penalty(displacement: Tensor) -> Tensor:
-    """Penalize negative Jacobian determinants."""
+def jacobian_folding_penalty(
+    displacement: Tensor,
+    margin: float = 0.0,
+    penalty: str = "squared",
+) -> Tensor:
+    """Penalize small or negative Jacobian determinants.
+
+    Args:
+        displacement: Dense displacement field ``[B, 3, D, H, W]``.
+        margin: Lower determinant margin. ``0`` penalizes only folding, while
+            values such as ``0.05`` start discouraging near-singular local
+            volume changes before actual folding appears.
+        penalty: ``"l1"`` for linear hinge or ``"squared"`` for a stronger
+            hinge penalty.
+
+    Returns:
+        Scalar anti-folding penalty.
+    """
 
     det_j = jacobian_determinant(displacement)
-    return torch.relu(-det_j).mean()
+    violation = torch.relu(displacement.new_tensor(float(margin)) - det_j)
+    if penalty == "l1":
+        return violation.mean()
+    if penalty == "squared":
+        return violation.pow(2).mean()
+    raise ValueError("penalty must be 'l1' or 'squared'")
 
 
 def reliability_sparsity_loss(reliability: Tensor) -> Tensor:

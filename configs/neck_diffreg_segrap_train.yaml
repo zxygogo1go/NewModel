@@ -5,9 +5,9 @@ model:
   tissue_channels: 0
   base_channels: 4
   num_skeleton_nodes: 1
-  velocity_integration_steps: 4
-  integration_steps: 4
-  residual_velocity_scale: 0.08
+  velocity_integration_steps: 5
+  integration_steps: 5
+  residual_velocity_scale: 0.04
 
 data:
   mode: segrap
@@ -45,21 +45,24 @@ training:
   val_metric: loss
   val_metric_mode: min
   save_every: 1000
+  grad_clip_norm: 1.0
   output_dir: outputs/checkpoints
-  checkpoint_name: neck_diffreg_segrap_train_5k.pt
-  best_checkpoint_name: best_neck_diffreg_segrap_train_5k.pt
+  checkpoint_name: neck_diffreg_segrap_stable_5k.pt
+  best_checkpoint_name: best_neck_diffreg_segrap_stable_5k.pt
   resume_from: null
 
 loss:
   similarity: weighted_mse
   ncc_window_size: 5
+  jacobian_margin: 0.05
+  jacobian_penalty: squared
   reliability_mean_target: 0.75
   tissue_aware_smoothness: false
   tissue_channel_weights: [2.0, 1.0, 1.0, 0.5, 0.5, 1.0, 0.3]
   weights:
     similarity: 1.0
-    smoothness: 0.05
-    jacobian: 0.01
+    smoothness: 0.2
+    jacobian: 0.2
     reliability_tv: 0.02
     reliability_sparsity: 0.01
     reliability_mean_prior: 0.01

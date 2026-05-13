@@ -52,6 +52,8 @@ def build_criterion_from_config(loss_cfg: dict[str, Any]) -> NeckDiffRegLoss:
         tissue_aware_smoothness=bool(loss_cfg.get("tissue_aware_smoothness", False)),
         tissue_channel_weights=loss_cfg.get("tissue_channel_weights"),
         reliability_mean_target=float(loss_cfg.get("reliability_mean_target", 0.75)),
+        jacobian_margin=float(loss_cfg.get("jacobian_margin", 0.0)),
+        jacobian_penalty=str(loss_cfg.get("jacobian_penalty", "squared")),
     )
 
 

@@ -47,6 +47,8 @@ class NeckDiffRegLoss(nn.Module):
         tissue_aware_smoothness: bool = False,
         tissue_channel_weights: list[float] | None = None,
         reliability_mean_target: float = 0.75,
+        jacobian_margin: float = 0.0,
+        jacobian_penalty: str = "squared",
     ) -> None:
         super().__init__()
         if weights is None:
@@ -60,6 +62,8 @@ class NeckDiffRegLoss(nn.Module):
         self.tissue_aware_smoothness = tissue_aware_smoothness
         self.tissue_channel_weights = tissue_channel_weights
         self.reliability_mean_target = reliability_mean_target
+        self.jacobian_margin = jacobian_margin
+        self.jacobian_penalty = jacobian_penalty
 
     def _similarity(self, outputs: dict[str, Any], batch: dict[str, Tensor]) -> Tensor:
         if self.similarity == "ncc":
@@ -78,7 +82,11 @@ class NeckDiffRegLoss(nn.Module):
             )
         else:
             components["smoothness"] = gradient_smoothness_loss(outputs["velocity"], penalty="l2")
-        components["jacobian"] = jacobian_folding_penalty(outputs["phi_total"])
+        components["jacobian"] = jacobian_folding_penalty(
+            outputs["phi_total"],
+            margin=self.jacobian_margin,
+            penalty=self.jacobian_penalty,
+        )
         components["reliability_tv"] = total_variation_loss(outputs["reliability"])
         components["noncorrespondence_sparsity"] = reliability_sparsity_loss(outputs["reliability"])
         components["reliability_mean_prior"] = mean_reliability_prior_loss(
