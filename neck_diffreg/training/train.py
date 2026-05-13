@@ -9,32 +9,25 @@ from typing import Any
 import torch
 
 from neck_diffreg.data.dataset import build_dataloader
-from neck_diffreg.losses.total_loss import NeckDiffRegLoss
-from neck_diffreg.models.neck_diffreg import NeCKDiffReg
 from neck_diffreg.training.config import load_config
-from neck_diffreg.utils.io import ensure_dir
+from neck_diffreg.training.runtime import (
+    build_criterion_from_config,
+    build_model_from_config,
+    device_from_config,
+    load_checkpoint,
+    save_checkpoint,
+    to_device,
+)
+from neck_diffreg.training.validate import build_validation_loader, evaluate_model
 from neck_diffreg.utils.seed import set_seed
 
 
-def _device_from_config(config: dict[str, Any]) -> torch.device:
-    requested = str(config.get("device", "cpu"))
-    if requested == "cuda" and torch.cuda.is_available():
-        return torch.device("cuda")
-    if requested == "mps" and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        return torch.device("mps")
-    return torch.device("cpu")
-
-
-def _to_device(batch: dict[str, Any], device: torch.device) -> dict[str, Any]:
-    return {key: value.to(device) if torch.is_tensor(value) else value for key, value in batch.items()}
-
-
 def train(config_path: str | Path) -> Path:
-    """Run a short synthetic training job and save a checkpoint."""
+    """Run training and save checkpoints."""
 
     config = load_config(config_path)
     set_seed(int(config.get("seed", 1234)))
-    device = _device_from_config(config.get("training", {}))
+    device = device_from_config(config.get("training", {}))
 
     data_cfg = config.get("data", {})
     train_cfg = config.get("training", {})
@@ -46,31 +39,40 @@ def train(config_path: str | Path) -> Path:
         batch_size=int(train_cfg.get("batch_size", 1)),
         shuffle=True,
     )
-    model = NeCKDiffReg(
-        image_channels=int(model_cfg.get("image_channels", 1)),
-        tissue_channels=int(model_cfg.get("tissue_channels", 0)),
-        base_channels=int(model_cfg.get("base_channels", 8)),
-        num_skeleton_nodes=int(model_cfg.get("num_skeleton_nodes", 10)),
-        integration_steps=int(model_cfg.get("velocity_integration_steps", model_cfg.get("integration_steps", 4))),
-        residual_velocity_scale=float(model_cfg.get("residual_velocity_scale", 0.15)),
-    ).to(device)
-    criterion = NeckDiffRegLoss(
-        weights=loss_cfg.get("weights", {}),
-        similarity=str(loss_cfg.get("similarity", "weighted_mse")),
-        ncc_window_size=int(loss_cfg.get("ncc_window_size", 5)),
-        tissue_aware_smoothness=bool(loss_cfg.get("tissue_aware_smoothness", False)),
-        tissue_channel_weights=loss_cfg.get("tissue_channel_weights"),
-        reliability_mean_target=float(loss_cfg.get("reliability_mean_target", 0.75)),
-    )
+    val_loader = None
+    val_interval = int(train_cfg.get("val_interval", 0))
+    if val_interval > 0:
+        val_loader = build_validation_loader(config)
+
+    model = build_model_from_config(model_cfg).to(device)
+    criterion = build_criterion_from_config(loss_cfg)
     optimizer = torch.optim.Adam(model.parameters(), lr=float(train_cfg.get("learning_rate", 1.0e-3)))
 
     max_iters = int(train_cfg.get("max_iters", 2))
     log_interval = max(1, int(train_cfg.get("log_interval", 1)))
-    model.train()
+    save_every = int(train_cfg.get("save_every", 0))
+    output_dir = Path(train_cfg.get("output_dir", "outputs/checkpoints"))
+    checkpoint_name = str(train_cfg.get("checkpoint_name", "neck_diffreg_synthetic.pt"))
+    checkpoint_path = output_dir / checkpoint_name
+    best_checkpoint_name = str(train_cfg.get("best_checkpoint_name", f"best_{checkpoint_name}"))
+    best_checkpoint_path = output_dir / best_checkpoint_name
+    resume_from = train_cfg.get("resume_from")
+    val_metric_name = str(train_cfg.get("val_metric", "loss"))
+    val_metric_mode = str(train_cfg.get("val_metric_mode", "min"))
+    best_metric = float("inf") if val_metric_mode == "min" else -float("inf")
     step = 0
+
+    if resume_from:
+        checkpoint = load_checkpoint(resume_from, model, optimizer=optimizer, map_location=device)
+        step = int(checkpoint.get("step", 0))
+        if "best_metric" in checkpoint:
+            best_metric = float(checkpoint["best_metric"])
+        print(f"resumed_checkpoint={resume_from} step={step}", flush=True)
+
+    model.train()
     while step < max_iters:
         for batch in loader:
-            batch = _to_device(batch, device)
+            batch = to_device(batch, device)
             outputs = model(
                 moving=batch["moving"],
                 fixed=batch["fixed"],
@@ -93,22 +95,30 @@ def train(config_path: str | Path) -> Path:
                     if name != "total"
                 )
                 print(f"iter={step:03d} total={loss.detach().cpu().item():.5f} {component_text}", flush=True)
+            if val_loader is not None and step % val_interval == 0:
+                val_metrics = evaluate_model(
+                    model,
+                    val_loader,
+                    criterion,
+                    device,
+                    max_batches=train_cfg.get("val_max_batches"),
+                )
+                metric_text = ", ".join(f"{name}={value:.5f}" for name, value in sorted(val_metrics.items()))
+                print(f"val_iter={step:03d} {metric_text}", flush=True)
+                current_metric = float(val_metrics[val_metric_name])
+                is_better = current_metric < best_metric if val_metric_mode == "min" else current_metric > best_metric
+                if is_better:
+                    best_metric = current_metric
+                    saved = save_checkpoint(best_checkpoint_path, model, optimizer, config, step, best_metric=best_metric)
+                    print(f"saved_best_checkpoint={saved} {val_metric_name}={best_metric:.5f}", flush=True)
+            if save_every > 0 and step % save_every == 0:
+                periodic_path = output_dir / f"iter_{step:06d}_{checkpoint_name}"
+                saved = save_checkpoint(periodic_path, model, optimizer, config, step, best_metric=best_metric)
+                print(f"saved_periodic_checkpoint={saved}", flush=True)
             if step >= max_iters:
                 break
 
-    output_dir = Path(train_cfg.get("output_dir", "outputs/checkpoints"))
-    ensure_dir(output_dir)
-    checkpoint_name = str(train_cfg.get("checkpoint_name", "neck_diffreg_synthetic.pt"))
-    checkpoint_path = output_dir / checkpoint_name
-    torch.save(
-        {
-            "model_state_dict": model.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
-            "config": config,
-            "step": step,
-        },
-        checkpoint_path,
-    )
+    save_checkpoint(checkpoint_path, model, optimizer, config, step, best_metric=best_metric)
     print(f"saved_checkpoint={checkpoint_path}", flush=True)
     return checkpoint_path
 

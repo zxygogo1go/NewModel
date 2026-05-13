@@ -22,14 +22,33 @@ data:
   num_workers: 0
   pin_memory: false
 
+val_data:
+  mode: segrap
+  root: data
+  split: val
+  pairs_path: data/lists/val_pairs.csv
+  expected_shape: [160, 160, 192]
+  validate_shapes: true
+  validate_image_range: true
+  num_workers: 0
+  pin_memory: false
+
 training:
-  device: cpu
+  device: cuda
   batch_size: 1
+  val_batch_size: 1
   learning_rate: 0.0001
-  max_iters: 100
-  log_interval: 10
+  max_iters: 5000
+  log_interval: 50
+  val_interval: 500
+  val_max_batches: 8
+  val_metric: loss
+  val_metric_mode: min
+  save_every: 1000
   output_dir: outputs/checkpoints
-  checkpoint_name: neck_diffreg_segrap_train.pt
+  checkpoint_name: neck_diffreg_segrap_train_5k.pt
+  best_checkpoint_name: best_neck_diffreg_segrap_train_5k.pt
+  resume_from: null
 
 loss:
   similarity: weighted_mse
